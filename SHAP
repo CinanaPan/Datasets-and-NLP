@@ -1,0 +1,56 @@
+# shap_explanation.py
+# 安装依赖
+!pip install -q numpy==1.23.5 tensorflow==2.14.1 alibi==0.9.6 shap==0.44.0
+
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.datasets import imdb
+from tensorflow.keras.preprocessing import sequence
+import shap
+
+# 配置参数
+max_features = 5000
+maxlen = 50
+
+# 加载精简数据集
+(x_train, y_train), (x_test, y_test) = imdb.load_data(num_words=max_features)
+x_train = sequence.pad_sequences(x_train, maxlen=maxlen)
+x_test = sequence.pad_sequences(x_test, maxlen=maxlen)
+
+# 复用相同简化模型
+model = tf.keras.Sequential([
+    tf.keras.layers.Embedding(max_features, 32),
+    tf.keras.layers.GlobalAvgPool1D(),
+    tf.keras.layers.Dense(1, activation='sigmoid')
+])
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model.fit(x_train, y_train, epochs=2, batch_size=128)
+
+# SHAP解释主程序
+def shap_explain(sentence):
+    # 文本向量化工具
+    word_index = imdb.get_word_index()
+    
+    def vectorizer(text):
+        tokens = [word_index.get(word.lower(), 0)+3 for word in text.split()]
+        return sequence.pad_sequences([tokens], maxlen=maxlen)[0]
+    
+    # 构建解释器
+    masker = shap.maskers.Text(tokenizer=None, mask_token=0)
+    explainer = shap.Explainer(
+        lambda x: model.predict(x.reshape(-1, maxlen)),
+        masker=masker
+    )
+    
+    # 生成解释
+    sample_vec = vectorizer(sentence)
+    shap_values = explainer([sample_vec])
+    shap.plots.text(shap_values)
+
+# 测试案例
+if __name__ == "__main__":
+    test_sentence = (
+        "I praise Robert Altman. This film deals with unconventional fascinating subject matter "
+        "and provokes strong emotional response."
+    )
+    shap_explain(test_sentence)
