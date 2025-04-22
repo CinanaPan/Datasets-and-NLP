@@ -1,71 +1,42 @@
-# ig_explanation.py
-# 安装依赖
-!pip install -q numpy==1.23.5 tensorflow==2.14.1 alibi==0.9.6 matplotlib==3.7.1
+# ig_explanation.py (DistilBERT适配版)
+!pip install -q transformers shap alibi
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras.datasets import imdb
-from tensorflow.keras.preprocessing import sequence
+from transformers import DistilBertTokenizer, TFDistilBertForSequenceClassification
 from alibi.explainers import IntegratedGradients
-import matplotlib.pyplot as plt
 
-# 配置参数
-max_features = 5000
-maxlen = 50
+# 加载预训练模型与分词器
+model = TFDistilBertForSequenceClassification.from_pretrained('distilbert-base-uncased')
+tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
 
-# 加载精简数据集
-(x_train, y_train), (x_test, y_test) = imdb.load_data(num_words=max_features)
-x_train = sequence.pad_sequences(x_train, maxlen=maxlen)
-x_test = sequence.pad_sequences(x_test, maxlen=maxlen)
+# 语言学基线生成函数
+def create_linguistic_baseline(text):
+    encoded = tokenizer(text, return_tensors='tf', padding='max_length', max_length=50)
+    baseline_ids = np.full_like(encoded['input_ids'], tokenizer.mask_token_id)  # 使用[MASK]基线
+    return {'input_ids': baseline_ids, 'attention_mask': encoded['attention_mask']}
 
-# 构建含嵌入层的模型
-model = tf.keras.Sequential([
-    tf.keras.layers.Embedding(max_features, 32, input_length=maxlen),
-    tf.keras.layers.GlobalAvgPool1D(),
-    tf.keras.layers.Dense(1, activation='sigmoid')
-])
-model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-model.fit(x_train, y_train, epochs=2, batch_size=128)
-
-# IG解释主程序
-def ig_explain(sentence):
-    # 文本向量化
-    word_index = imdb.get_word_index()
-    reverse_index = {v+3: k for k, v in word_index.items()}
-    
-    def vectorize(text):
-        tokens = [word_index.get(word.lower(), 0)+3 for word in text.split()]
-        return sequence.pad_sequences([tokens], maxlen=maxlen)[0]
-    
-    # 准备输入
-    sample_vec = vectorize(sentence)
-    baseline = np.zeros_like(sample_vec)  # 使用零基线
+# IG解释器配置
+def ig_explain(text):
+    # 编码文本
+    inputs = tokenizer(text, return_tensors='tf', padding='max_length', max_length=50)
+    baseline = create_linguistic_baseline(text)
     
     # 初始化IG
     ig = IntegratedGradients(
-        model,
-        layer=model.layers[0],  # 嵌入层
-        n_steps=20  # 减少步数加速计算
+        model, 
+        layer=model.distilbert.embeddings,  # 直接定位嵌入层
+        n_steps=20
     )
     
     # 计算归因
     explanation = ig.explain(
-        sample_vec.reshape(1, -1), 
-        baselines=baseline.reshape(1, -1)
+        inputs={'input_ids': inputs['input_ids'], 'attention_mask': inputs['attention_mask']},
+        baselines=baseline
     )
-    attrs = explanation.attributions[0].sum(axis=1)  # 聚合嵌入维度
     
-    # 可视化
-    tokens = [reverse_index.get(idx, 'UNK') for idx in sample_vec if idx != 0]
-    plt.figure(figsize=(10, 3))
-    plt.barh(tokens, attrs[:len(tokens)], color='purple')
-    plt.title("Integrated Gradients Attribution")
-    plt.show()
-
-# 测试案例
-if __name__ == "__main__":
-    test_sentence = (
-        "This film is disturbing but sincere. It's worth the time "
-        "though difficult to find in stores."
-    )
-    ig_explain(test_sentence)
+    # 可视化处理
+    tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+    attrs = explanation.attributions[0][0].numpy().sum(axis=1)  # 聚合嵌入维度
+    
+    # 绘制归因图（具体绘图代码与原文类似）
