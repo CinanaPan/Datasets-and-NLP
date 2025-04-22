@@ -39,4 +39,17 @@ def ig_explain(text):
     tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
     attrs = explanation.attributions[0][0].numpy().sum(axis=1)  # 聚合嵌入维度
     
-    # 绘制归因图（具体绘图代码与原文类似）
+    # 可视化
+    tokens = [reverse_index.get(idx, 'UNK') for idx in sample_vec if idx != 0]
+    plt.figure(figsize=(10, 3))
+    plt.barh(tokens, attrs[:len(tokens)], color='purple')
+    plt.title("Integrated Gradients Attribution")
+    plt.show()
+
+# 测试案例
+if __name__ == "__main__":
+    test_sentence = (
+        "This film is disturbing but sincere. It's worth the time "
+        "though difficult to find in stores."
+    )
+    ig_explain(test_sentence)
